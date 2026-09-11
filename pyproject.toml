@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "everypisi"
+version = "0.1.0"
+description = "Debian, RPM ve Arch paketlerini Pisi Linux paketine dönüştürme aracı"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "AGPL-3.0-only"}
+authors = [{name = "EveryPisi contributors"}]
+dependencies = []
+
+[project.scripts]
+everypisi = "everypisi.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
