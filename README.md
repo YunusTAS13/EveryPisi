@@ -19,6 +19,114 @@ EveryPisi bu farkları görünür hâle getirir:
 - Kaynak paket ile oluşturulan çıktı için denetlenebilir hash ve JSON raporu üretir.
 - İkili yeniden paketleme ile kaynak koddan native Pisi derlemesini birbirinden ayırır.
 
+## Pisi paketi nasıl oluşturulur?
+
+Pisi'de iki farklı paketleme aşaması vardır: kaynak koddan native paket üretmek
+ve daha önce derlenmiş dosyaları binary paket olarak dağıtmak.
+
+### Native Pisi paketleme süreci
+
+Pisi'nin önerilen kaynak reçetesi aynı dizinde bulunan
+`pspec.xml` ve `actions.py` dosyalarından oluşur. Gerektiğinde `files/`,
+`comar/` ve çeviri dosyaları da bu reçeteye eklenir.
+
+1. `pspec.xml` kaynak arşivin adresini, SHA-1 özetini, paket adını, sürümünü,
+   lisansını, bağımlılıklarını ve açıklamasını tanımlar.
+2. Pisi kaynak arşivi indirir ve bildirilen SHA-1 değeriyle doğrular.
+3. Kaynak arşivi çalışma dizinine açar ve varsa yamaları uygular.
+4. `actions.py`, kaynak kodu hedef sistem için derleyip geçici `install`
+   dizinine kurar.
+5. Pisi bu dizindeki dosyaları indeksler; dosya yolu, türü, boyutu, izinleri,
+   sahibi ve SHA-1 değerini `files.xml` içine yazar.
+6. Paket metadata'sı `metadata.xml`, dosya indeksi `files.xml` ve sıkıştırılmış
+   payload `install.tar.xz` ile birleştirilerek Pisi 1.2 `.pisi` arşivi oluşur.
+
+Bu yöntem kaynak kodu hedef Pisi Linux ortamında yeniden derlediği için ABI,
+kurulum yolu ve dağıtım entegrasyonu bakımından en güvenilir yöntemdir. Bunun
+karşılığında derleyici, geliştirme bağımlılıkları, kaynak arşiv ve uygun bir
+Pisi build ortamı gerektirir.
+
+### Pisi binary paketi
+
+Bir `.pisi` dosyası ZIP tabanlı bir dış arşivdir. EveryPisi'nin ürettiği Pisi
+1.2 paketinde temel üyeler şunlardır:
+
+| Üye | Görevi |
+| --- | --- |
+| `metadata.xml` | Paket adı, sürüm, release, mimari, dağıtım ve bağımlılık bilgileri |
+| `files.xml` | Kurulacak dosyaların yolu, türü, boyutu, SHA-1, UID/GID ve izinleri |
+| `install.tar.xz` | Gerçek dosya, dizin, symlink ve güvenli biçimde korunabilen hardlink payload'ı |
+
+Pisi kurulum sırasında `install.tar.xz` içeriğini kök dosya sistemine açar,
+`files.xml` ile dosya listesini ve bütünlüğü izler, paket geçmişini günceller
+ve bağımlılık/çakışma kurallarını uygular. Pisi'ye özgü COMAR veya servis
+entegrasyonları ise yalnızca dosyaları taşımakla kendiliğinden oluşmaz; bunun
+için native reçete ve ilgili Pisi entegrasyonu gerekir.
+
+## EveryPisi bunu nasıl yapıyor?
+
+EveryPisi bir Debian, RPM veya Arch paketini körlemesine yeniden adlandırmaz.
+Kaynak paketi önce açar, sonra metadata ve payload'ı Pisi'nin ifade edebileceği
+alanlara dönüştürür. Her aşamada uyumsuzluk veya metadata kaybı tespit edilirse
+varsayılan davranış güvenli biçimde durmaktır.
+
+### Dönüşüm akışı
+
+1. **Biçim tespiti:** Girdi paketinin Debian, RPM veya Arch olduğu dış arşiv
+   imzası ve paket yapısıyla belirlenir.
+2. **Sınırlandırılmış ayrıştırma:** Giriş boyutu, açılmış veri boyutu, üye sayısı
+   ve yol uzunluğu limitleri uygulanır. Arşiv dışına yazabilecek yollar,
+   duplicate üyeler ve tehlikeli hardlink/symlink ilişkileri reddedilir.
+3. **Metadata ayrıştırma:** Paket adı, sürüm, release, mimari, bağımlılıklar,
+   çakışmalar, replace ilişkileri, script'ler ve bütünlük manifestleri okunur.
+4. **Payload incelemesi:** Dosya türleri, izinler, sahiplik, SUID/SGID, özel
+   dosyalar, xattr/ACL/capability izleri ve ELF bilgileri denetlenir.
+5. **ABI kontrolü:** ELF machine, 32/64-bit bilgisi ve dynamic loader hedef
+   Pisi mimarisiyle karşılaştırılır. `DT_NEEDED`, SONAME, RPATH/RUNPATH ve
+   sürümlü semboller uyumluluk raporuna eklenir.
+6. **Bağımlılık çözümleme:** Doğrudan ve transitif çalışma zamanı bağımlılıkları
+   doğrulanmış Pisi stable2 index'i üzerinden sürüm ve release sınırlarıyla
+   kontrol edilir. Offline veya eksik çözümleme açık onay olmadan kabul edilmez.
+7. **Dönüşüm kararı:** Script, trigger, imza, mimari, ABI, bağımlılık veya
+   metadata kaybı varsa rapor oluşturulur ve varsayılan olarak dönüşüm durur.
+   Açık güvenlik seçenekleri kullanılırsa bu karar ve kayıplar JSON raporuna
+   yazılır.
+8. **Pisi üretimi:** Uyumlu dosyalar deterministik `install.tar.xz` içine
+   yazılır; `metadata.xml` ve `files.xml` oluşturulur; üçü Pisi 1.2 ZIP
+   arşivinde birleştirilir.
+9. **Son doğrulama:** Oluşturulan `.pisi`, ZIP/XML/TAR yapısı, dosya manifesti,
+   hash'ler, boyutlar, sahiplik ve izinler açısından bağımsız validator ile
+   yeniden kontrol edilir.
+
+### Kaynak paketi ile Pisi alanlarının eşleştirilmesi
+
+| Yabancı paket bilgisi | EveryPisi'nin yaklaşımı |
+| --- | --- |
+| Debian `Depends`, RPM `Requires`, Arch `depends` | Pisi çalışma zamanı bağımlılığına çevrilir ve repository'de çözülür |
+| Sürüm ve release sınırları | Pisi'nin desteklediği alanlara taşınır; ifade kaybı varsa dönüşüm durur |
+| Maintainer script, scriptlet, `.INSTALL` | Çalıştırılmaz, payload'a kopyalanmaz; raporlanır ve native rebuild önerilir |
+| Debian `Provides`, RPM capability, Arch `provides` | Pisi 1.2'de güvenli karşılığı yoksa sahte paket adına indirgenmez |
+| RPM rich/boolean bağımlılığı | İfade ağacına dönüştürülmeden kayıp olarak raporlanır |
+| Paket imzası | Keyring/policy ile doğrulanır; doğrulanamayan imza açık onay olmadan reddedilir |
+| Dosya hash ve manifest | Kaynak manifesti kontrol edilir, çıktı için yeni Pisi manifesti oluşturulur |
+| ELF bağımlılıkları | Paket metadata'sında yoksa bile rapora ve çalışma zamanı kontrolüne eklenir |
+
+### Binary yeniden paketleme ne zaman yeterlidir?
+
+Bir paket hedef mimariyle uyumlu, bağımlılıkları çözülebilir, dosya metadata'sı
+korunabilir ve dağıtıma özgü kurulum davranışına ihtiyaç duymuyorsa binary
+yeniden paketleme yeterli olabilir. Bu işlem programı yeniden derlemez; mevcut
+ELF veya diğer binary dosyaları Pisi arşiv düzenine taşır.
+
+### Ne zaman native rebuild gerekir?
+
+Kaynak paket hedef Pisi ortamına göre derlenmemişse, glibc/libstdc++ veya başka
+ABI beklentileri uyuşmuyorsa, servis/COMAR entegrasyonu gerekiyorsa ya da
+scriptlet ve trigger davranışları önemliyse native rebuild gerekir. Bu durumda
+`pspec.xml` ve `actions.py` ile kaynak kod Pisi build ortamında yeniden
+derlenmelidir. EveryPisi'nin `rebuild` komutu bu native reçeteyi güvenlik
+kontrollerini kapatmadan çalıştırır.
+
 ## Özellikler
 
 ### Paket biçimleri
@@ -185,4 +293,3 @@ Araştırma ve tasarım kararları [RESEARCH.md](RESEARCH.md) dosyasında açık
 ## Lisans
 
 Bu proje [GNU Affero Genel Kamu Lisansı sürüm 3](LICENSE) ile lisanslanmıştır.
-
